@@ -24,14 +24,19 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 def find_open_issue_by_title(repo: str, title: str) -> int | None:
-    """Return the number of an open issue whose title exactly matches."""
+    """Return the number of an open issue whose title exactly matches.
+
+    Uses ``gh issue list`` without ``--search`` so the lookup hits the REST
+    list endpoint (strongly consistent) instead of the search API (eventually
+    consistent, ~30s-2min indexing lag). This prevents duplicate campaign
+    issues when runs happen close together.
+    """
     result = _run([
         "gh", "issue", "list",
         "--repo", repo,
         "--state", "open",
-        "--search", f'in:title "{title}"',
         "--json", "number,title",
-        "--limit", "20",
+        "--limit", "100",
     ])
     rows = json.loads(result.stdout or "[]")
     for row in rows:
