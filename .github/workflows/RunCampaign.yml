@@ -1,0 +1,151 @@
+name: Run Campaign
+
+# Generic dispatcher for the campaigns framework. Pick a campaign id,
+# optionally pass JSON params, and the framework will create/update a
+# tracking issue on the target repo and dispatch any per-item handlers
+# (which may also open PRs on a target repo).
+#
+# This workflow runs in the campaigns repo. The target repo is determined by
+# inputs.issue_repo / params_json.handler_repo and is cloned at runtime.
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign:
+        description: 'Campaign id (see campaigns/registry.py).'
+        type: choice
+        required: true
+        default: 'python-upgrade'
+        options:
+          - python-upgrade
+      params_json:
+        description: 'JSON object of campaign params (e.g. {"handler_repo":"YangAn-microsoft/azure-cli"}). repo_root is set automatically.'
+        required: false
+        default: '{}'
+      issue_repo:
+        description: 'Target repo for the tracking issue (OWNER/REPO). Empty = campaign default.'
+        required: false
+        default: ''
+      target_repo:
+        description: 'Repo to clone for handlers that need a working tree (OWNER/REPO). Empty = no clone.'
+        required: false
+        default: ''
+      target_ref:
+        description: 'Branch / ref to check out from target_repo.'
+        required: false
+        default: 'dev'
+      dry_run:
+        description: 'If true, print the plan only; do not touch GitHub or the working tree.'
+        type: boolean
+        required: false
+        default: false
+      force_recreate:
+        description: 'Re-dispatch handlers even for items already marked completed.'
+        type: boolean
+        required: false
+        default: false
+  workflow_call:
+    # Reusable from sibling workflows (e.g. PythonUpgradeDaily).
+    inputs:
+      campaign:           { type: string,  required: true }
+      params_json:        { type: string,  required: false, default: '{}' }
+      issue_repo:         { type: string,  required: false, default: '' }
+      target_repo:        { type: string,  required: false, default: '' }
+      target_ref:         { type: string,  required: false, default: 'dev' }
+      dry_run:            { type: boolean, required: false, default: false }
+      force_recreate:     { type: boolean, required: false, default: false }
+
+concurrency:
+  group: run-campaign-${{ inputs.campaign }}-${{ inputs.issue_repo }}
+  cancel-in-progress: false
+
+permissions:
+  # All write operations go through the App token. The default GITHUB_TOKEN
+  # only needs models:read for any LLM call inside a handler.
+  contents: read
+  models: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Kill switch
+        env:
+          ENABLED: ${{ vars.RUN_CAMPAIGN_ENABLED }}
+        run: |
+          # Disabled unless repo variable is explicitly set to "true".
+          if [ "$ENABLED" != "true" ]; then
+            echo "Run Campaign disabled (set repo variable RUN_CAMPAIGN_ENABLED=true to enable)."
+            exit 0
+          fi
+
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.AGENT_APP_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+          # App must also be installed on the target repos; list them here
+          # so the generated token has access to all of them.
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout campaigns repo
+        uses: actions/checkout@v4
+
+      - name: Configure git identity
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          git config --global user.name "${APP_SLUG}[bot]"
+          git config --global user.email "${APP_SLUG}[bot]@users.noreply.github.com"
+
+      - name: Clone target repo (optional)
+        if: inputs.target_repo != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          mkdir -p _work
+          # Use the App token for clone so subsequent push works.
+          git clone --depth 50 \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ inputs.target_repo }}.git" \
+            "_work/target"
+          git -C _work/target checkout "${{ inputs.target_ref }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Run campaign
+        env:
+          # App token: contents+issues+pull-requests write; used by gh and git push.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Default workflow token has models:read for any LLM call.
+          MODELS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AGENT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PARAMS_JSON: ${{ inputs.params_json }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+        run: |
+          # Inject repo_root into params if a target was cloned.
+          if [ -n "$TARGET_REPO" ]; then
+            PARAMS_JSON=$(python -c '
+          import json, os, sys
+          p = json.loads(os.environ.get("PARAMS_JSON") or "{}")
+          p.setdefault("repo_root", "_work/target")
+          p.setdefault("handler_repo", os.environ["TARGET_REPO"])
+          print(json.dumps(p))
+          ')
+          fi
+
+          ARGS=(--campaign "${{ inputs.campaign }}" --params "$PARAMS_JSON")
+          if [ -n "${{ inputs.issue_repo }}" ]; then
+            ARGS+=(--issue-repo "${{ inputs.issue_repo }}")
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          if [ "${{ inputs.force_recreate }}" = "true" ]; then
+            ARGS+=(--force-recreate)
+          fi
+          python -m run_campaign "${ARGS[@]}"

@@ -1,0 +1,39 @@
+name: Python Upgrade Daily
+
+# Cron-driven entry point for the python-upgrade campaign. Calls RunCampaign
+# with appropriate defaults so the campaigns framework does the actual work.
+
+on:
+  schedule:
+    # 09:00 UTC daily. Cron does not run on forks unless explicitly enabled.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: 'Target repo (OWNER/REPO).'
+        required: true
+        default: 'YangAn-microsoft/azure-cli'
+      issue_repo:
+        description: 'Tracking-issue repo. Defaults to target_repo.'
+        required: false
+        default: ''
+      dry_run:
+        description: 'If true, print the plan only.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  call:
+    uses: ./.github/workflows/RunCampaign.yml
+    secrets: inherit
+    with:
+      campaign: python-upgrade
+      target_repo: ${{ inputs.target_repo || 'YangAn-microsoft/azure-cli' }}
+      issue_repo: ${{ inputs.issue_repo || inputs.target_repo || 'YangAn-microsoft/azure-cli' }}
+      params_json: '{"reference_repo":"Azure/azure-cli"}'
+      dry_run: ${{ inputs.dry_run || false }}
