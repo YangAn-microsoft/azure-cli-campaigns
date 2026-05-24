@@ -33,11 +33,10 @@ def test_build_with_forced_versions_returns_plan():
     ids = [it.id for it in plan.items]
     assert ids == [
         "prereq-knack",
-        "prereq-aaz-dev",
-        "prereq-azdev",
-        "ci-passes",
-        "extensions-compatible",
         "azure-cli-bump",
+        "aaz-dev",
+        "azdev",
+        "azure-cli-extensions",
     ]
 
 

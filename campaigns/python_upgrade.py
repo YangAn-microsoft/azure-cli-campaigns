@@ -78,27 +78,13 @@ def _build_items(
 ) -> list[Item]:
     new = target.minor_str
     return [
+        # Real prerequisite: knack must release a compatible version first
+        # because azure-cli pins it as a runtime dependency.
         Item(
             id="prereq-knack",
             title=f"`knack` supports Python {new}",
         ),
-        Item(
-            id="prereq-aaz-dev",
-            title=f"`aaz-dev` supports Python {new}",
-        ),
-        Item(
-            id="prereq-azdev",
-            title=f"`azdev` supports Python {new}",
-        ),
-        Item(
-            id="ci-passes",
-            title=f"CI passes with Python {new} "
-                  f"(dependency bumps and `azure-cli-extensions` pipeline included)",
-        ),
-        Item(
-            id="extensions-compatible",
-            title=f"Published extensions compatible with Python {new}",
-        ),
+        # Handler-driven: bumps the embedded interpreter in azure-cli.
         Item(
             id="azure-cli-bump",
             title=f"Support Python {new} "
@@ -110,6 +96,19 @@ def _build_items(
                 "new_full": target.full_str,
             },
             repo=handler_repo,
+        ),
+        # Companion repos: upgraded alongside azure-cli, not blocking prereqs.
+        Item(
+            id="aaz-dev",
+            title=f"`aaz-dev` supports Python {new}",
+        ),
+        Item(
+            id="azdev",
+            title=f"`azdev` supports Python {new}",
+        ),
+        Item(
+            id="azure-cli-extensions",
+            title=f"`azure-cli-extensions` supports Python {new}",
         ),
     ]
 
