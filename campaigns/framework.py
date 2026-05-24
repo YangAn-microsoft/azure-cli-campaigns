@@ -53,10 +53,13 @@ def create_issue(repo: str, title: str, body: str) -> int:
 
 
 def update_issue_body(repo: str, number: int, body: str) -> None:
+    # Use REST PATCH (not `gh issue edit`, which goes through the GraphQL
+    # `updateIssue` mutation and trips a stricter permission check for App
+    # tokens on forked repos).
     _run([
-        "gh", "issue", "edit", str(number),
-        "--repo", repo,
-        "--body", body,
+        "gh", "api", "--method", "PATCH",
+        f"/repos/{repo}/issues/{number}",
+        "-f", f"body={body}",
     ])
 
 
@@ -145,12 +148,15 @@ def run(
             item_state[item.id] = ItemState(status="failed", notes=f"unknown handler {item.handler}")
             continue
         item_state[item.id] = ItemState(status="in_progress")
+        # Merge campaign-level params (e.g. repo_root, reference_repo) with
+        # item-level params; item wins on conflict.
+        merged_params = {**params, **item.params}
         try:
             result = handler(HandlerContext(
                 item=item,
                 repo=item.repo or campaign.issue_repo,
                 issue_number=issue_number,
-                params=item.params,
+                params=merged_params,
                 force_recreate=force_recreate,
                 dry_run=dry_run,
             ))
