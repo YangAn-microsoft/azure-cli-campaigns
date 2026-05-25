@@ -13,12 +13,15 @@ class Item:
 
     ``handler`` is the registered handler name (see ``registry.HANDLERS``).
     ``None`` means the item is manual and the framework never touches it.
+    ``depends_on`` lists item ids this item logically depends on; used only
+    for the roadmap diagram (the framework does not enforce ordering).
     """
     id: str
     title: str
     handler: str | None = None
     params: dict = field(default_factory=dict)
     repo: str | None = None
+    depends_on: tuple[str, ...] = ()
 
 
 @dataclass

@@ -113,19 +113,23 @@ def _build_items(
             handler="knack_pin_bumper",
             params={"new_minor": target.minor_str},
             repo=handler_repo,
+            depends_on=("prereq-knack",),
         ),
         # Companion repos: upgraded alongside azure-cli, not blocking prereqs.
         Item(
             id="aaz-dev",
             title=f"`aaz-dev` supports Python {new}",
+            depends_on=("azure-cli-bump",),
         ),
         Item(
             id="azdev",
             title=f"`azdev` supports Python {new}",
+            depends_on=("azure-cli-bump",),
         ),
         Item(
             id="azure-cli-extensions",
             title=f"`azure-cli-extensions` supports Python {new}",
+            depends_on=("azure-cli-bump",),
         ),
     ]
 

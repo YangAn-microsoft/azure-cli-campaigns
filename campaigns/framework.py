@@ -9,6 +9,7 @@ import subprocess
 from typing import Callable
 
 from . import report as report_mod
+from . import roadmap as roadmap_mod
 from . import state as state_mod
 from .base import (
     Campaign,
@@ -123,11 +124,29 @@ def fetch_issue_body(repo: str, number: int) -> str:
     return result.stdout
 
 
-def render_body(plan: CampaignPlan, item_state: dict[str, ItemState]) -> str:
-    """Compose the full issue body: state block + intro + checklist."""
+def render_body(
+    plan: CampaignPlan,
+    item_state: dict[str, ItemState],
+    *,
+    issue_repo: str | None = None,
+    issue_number: int | None = None,
+) -> str:
+    """Compose the full issue body: state block + intro + roadmap + checklist.
+
+    ``issue_repo`` and ``issue_number`` are required to render the roadmap
+    diagram. When omitted (e.g. unit tests), the roadmap section is skipped.
+    """
     lines: list[str] = [state_mod.serialize(item_state), ""]
     if plan.intro.strip():
         lines.append(plan.intro.strip())
+        lines.append("")
+    if issue_repo is not None:
+        lines.append("## Progress")
+        lines.append("")
+        lines.append(roadmap_mod.build_roadmap_mermaid(
+            plan, item_state,
+            issue_repo=issue_repo, issue_number=issue_number,
+        ))
         lines.append("")
     lines.append("## Plan")
     lines.append("")
@@ -175,7 +194,8 @@ def run(
     if issue_number is None:
         seed_state: dict[str, ItemState] = {item.id: ItemState() for item in plan.items}
         issue_number = create_issue(
-            campaign.issue_repo, plan.title, render_body(plan, seed_state),
+            campaign.issue_repo, plan.title,
+            render_body(plan, seed_state, issue_repo=campaign.issue_repo),
         )
         newly_created = True
         print(f"campaign[{campaign.id}]: created issue #{issue_number}")
@@ -236,7 +256,9 @@ def run(
 
     # 4. Re-render and update issue body.
     update_issue_body(
-        campaign.issue_repo, issue_number, render_body(plan, item_state),
+        campaign.issue_repo, issue_number,
+        render_body(plan, item_state,
+                    issue_repo=campaign.issue_repo, issue_number=issue_number),
     )
 
     # 5. Post run report if anything's worth notifying about.
