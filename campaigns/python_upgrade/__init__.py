@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from .azure_cli_upgrader import agent, detect
+from .knack_upgrader import agent as knack_agent
+from .knack_pin_bumper import agent as knack_pin_agent
 
 from ..base import Campaign, CampaignPlan, HandlerContext, HandlerResult, Item
 
@@ -49,7 +51,8 @@ class PythonUpgradeCampaign:
         title = f"Support Python {target.minor_str}"
         intro = _render_intro(current=current, target=target)
         items = _build_items(current=current, target=target,
-                             handler_repo=params.get("handler_repo"))
+                             handler_repo=params.get("handler_repo"),
+                             knack_repo=params.get("knack_repo", "Azure/knack"))
         return CampaignPlan(
             title=title,
             intro=intro,
@@ -75,26 +78,40 @@ def _build_items(
     current: detect.Version,
     target: detect.Version,
     handler_repo: str | None,
+    knack_repo: str | None,
 ) -> list[Item]:
     new = target.minor_str
     return [
-        # Real prerequisite: knack must release a compatible version first
-        # because azure-cli pins it as a runtime dependency.
-        Item(
-            id="prereq-knack",
-            title=f"`knack` supports Python {new}",
-        ),
-        # Handler-driven: bumps the embedded interpreter in azure-cli.
+        # Lead item: bumps the embedded interpreter in azure-cli. Opens day 0
+        # so CI feedback surfaces follow-up work as early as possible.
         Item(
             id="azure-cli-bump",
             title=f"Support Python {new} "
                   f"(bump embedded interpreter: {current.full_str} → {target.full_str})",
-            handler="python_upgrade_agent",
+            handler="azure_cli_upgrader",
             params={
                 "current_minor": current.minor_str,
                 "new_minor": target.minor_str,
                 "new_full": target.full_str,
             },
+            repo=handler_repo,
+        ),
+        # Parallel: opens PR on knack repo declaring new Python support.
+        # Flips to completed once knack ships a release on PyPI.
+        Item(
+            id="prereq-knack",
+            title=f"`knack` supports Python {new}",
+            handler="knack_upgrader",
+            params={"new_minor": target.minor_str},
+            repo=knack_repo,
+        ),
+        # Follow-up: after knack ships, bump the knack pin in azure-cli
+        # (separate small PR, decoupled from the main embedded-Python PR).
+        Item(
+            id="azure-cli-knack-pin",
+            title=f"Bump `knack` pin in azure-cli after Python {new} release",
+            handler="knack_pin_bumper",
+            params={"new_minor": target.minor_str},
             repo=handler_repo,
         ),
         # Companion repos: upgraded alongside azure-cli, not blocking prereqs.
@@ -136,7 +153,7 @@ def _render_intro(*, current: detect.Version, target: detect.Version) -> str:
 
 # ----- Handler -----
 
-def python_upgrade_handler(ctx: HandlerContext) -> HandlerResult:
+def azure_cli_upgrader_handler(ctx: HandlerContext) -> HandlerResult:
     """Adapt the framework's HandlerContext to ``agent.run_pipeline`` and map
     the returned PipelineResult back into a HandlerResult."""
     repo_root = Path(ctx.params.get("repo_root") or ".").resolve()
@@ -154,5 +171,41 @@ def python_upgrade_handler(ctx: HandlerContext) -> HandlerResult:
         dry_run=ctx.dry_run,
         run_url=ctx.params.get("run_url", ""),
         tracking_issue=ctx.issue_number,
+    )
+    return HandlerResult(status=result.status, pr=result.pr, notes=result.notes)
+
+
+# Backwards-compat alias for older registrations.
+python_upgrade_handler = azure_cli_upgrader_handler
+
+
+def knack_upgrader_handler(ctx: HandlerContext) -> HandlerResult:
+    """Open / track a PR on the knack repo declaring new Python support."""
+    work_dir = ctx.params.get("work_dir")
+    result = knack_agent.run_pipeline(
+        repo=ctx.repo,
+        new_minor=ctx.params.get("new_minor", ""),
+        work_dir=Path(work_dir).resolve() if work_dir else None,
+        tracking_issue=ctx.issue_number,
+        tracking_repo=ctx.params.get("tracking_repo"),
+        base_branch=ctx.params.get("base_branch", "dev"),
+        dry_run=ctx.dry_run,
+        force_recreate=ctx.force_recreate,
+    )
+    return HandlerResult(status=result.status, pr=result.pr, notes=result.notes)
+
+
+def knack_pin_bumper_handler(ctx: HandlerContext) -> HandlerResult:
+    """Bump the knack pin in azure-cli's setup.py once knack ships on PyPI."""
+    repo_root = Path(ctx.params.get("repo_root") or ".").resolve()
+    result = knack_pin_agent.run_pipeline(
+        repo=ctx.repo,
+        repo_root=repo_root,
+        new_minor=ctx.params.get("new_minor", ""),
+        base_branch=ctx.params.get("base_branch", "dev"),
+        tracking_issue=ctx.issue_number,
+        tracking_repo=ctx.params.get("tracking_repo"),
+        dry_run=ctx.dry_run,
+        force_recreate=ctx.force_recreate,
     )
     return HandlerResult(status=result.status, pr=result.pr, notes=result.notes)

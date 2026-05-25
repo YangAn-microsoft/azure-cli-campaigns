@@ -32,8 +32,9 @@ def test_build_with_forced_versions_returns_plan():
     assert plan.title == "Support Python 3.14"
     ids = [it.id for it in plan.items]
     assert ids == [
-        "prereq-knack",
         "azure-cli-bump",
+        "prereq-knack",
+        "azure-cli-knack-pin",
         "aaz-dev",
         "azdev",
         "azure-cli-extensions",

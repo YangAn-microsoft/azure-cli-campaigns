@@ -10,7 +10,12 @@ from __future__ import annotations
 from typing import Callable
 
 from .base import Campaign, HandlerContext, HandlerResult
-from .python_upgrade import PythonUpgradeCampaign, python_upgrade_handler
+from .python_upgrade import (
+    PythonUpgradeCampaign,
+    azure_cli_upgrader_handler,
+    knack_pin_bumper_handler,
+    knack_upgrader_handler,
+)
 
 
 CAMPAIGNS: dict[str, Campaign] = {
@@ -18,5 +23,9 @@ CAMPAIGNS: dict[str, Campaign] = {
 }
 
 HANDLERS: dict[str, Callable[[HandlerContext], HandlerResult]] = {
-    "python_upgrade_agent": python_upgrade_handler,
+    "azure_cli_upgrader": azure_cli_upgrader_handler,
+    "knack_upgrader": knack_upgrader_handler,
+    "knack_pin_bumper": knack_pin_bumper_handler,
+    # Backwards-compat alias.
+    "python_upgrade_agent": azure_cli_upgrader_handler,
 }
