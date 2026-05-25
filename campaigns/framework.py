@@ -2,10 +2,13 @@
 handlers, and keeps the issue body in sync with structured state."""
 from __future__ import annotations
 
+import copy
 import json
+import os
 import subprocess
 from typing import Callable
 
+from . import report as report_mod
 from . import state as state_mod
 from .base import (
     Campaign,
@@ -55,6 +58,48 @@ def create_issue(repo: str, title: str, body: str) -> int:
     ])
     url = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
     return int(url.rsplit("/", 1)[-1])
+
+
+def post_issue_comment(repo: str, number: int, body: str) -> None:
+    """Post a comment on an existing issue."""
+    _run([
+        "gh", "issue", "comment", str(number),
+        "--repo", repo,
+        "--body", body,
+    ])
+
+
+def add_issue_assignees(repo: str, number: int, users: list[str]) -> None:
+    """Best-effort: add assignees. Logs and continues on failure (e.g. user
+    is outside the org or doesn't exist) so the campaign isn't blocked."""
+    if not users:
+        return
+    cleaned = [u.lstrip("@") for u in users if u.strip()]
+    if not cleaned:
+        return
+    try:
+        _run([
+            "gh", "issue", "edit", str(number),
+            "--repo", repo,
+            "--add-assignee", ",".join(cleaned),
+        ])
+    except subprocess.CalledProcessError as exc:
+        print(f"campaign: could not assign {cleaned} to #{number}: "
+              f"{(exc.stderr or '').strip()}")
+
+
+def _write_step_summary(body: str) -> None:
+    """Append to GitHub Actions step summary if running in CI."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(body)
+            if not body.endswith("\n"):
+                fh.write("\n")
+    except OSError as exc:
+        print(f"campaign: could not write step summary: {exc}")
 
 
 def update_issue_body(repo: str, number: int, body: str) -> None:
@@ -123,13 +168,28 @@ def run(
         return -1
 
     # 1. Find or create the plan issue.
+    run_url = params.get("run_url", "")
+    notify_users = params.get("notify_users") or []
     issue_number = find_open_issue_by_title(campaign.issue_repo, plan.title)
+    newly_created = False
     if issue_number is None:
         seed_state: dict[str, ItemState] = {item.id: ItemState() for item in plan.items}
         issue_number = create_issue(
             campaign.issue_repo, plan.title, render_body(plan, seed_state),
         )
+        newly_created = True
         print(f"campaign[{campaign.id}]: created issue #{issue_number}")
+        # Notify configured developers about the new campaign. Both steps
+        # are best-effort: assignment may fail for non-org users, the
+        # announcement comment still guarantees an at-mention notification.
+        if notify_users:
+            add_issue_assignees(campaign.issue_repo, issue_number, notify_users)
+        post_issue_comment(
+            campaign.issue_repo, issue_number,
+            report_mod.build_creation_announcement(
+                plan=plan, notify_users=notify_users, run_url=run_url,
+            ),
+        )
     else:
         print(f"campaign[{campaign.id}]: reusing issue #{issue_number}")
 
@@ -138,6 +198,7 @@ def run(
     item_state = state_mod.parse(body)
     for item in plan.items:
         item_state.setdefault(item.id, ItemState())
+    before_state = copy.deepcopy(item_state)
 
     # 3. Dispatch handlers.
     for item in plan.items:
@@ -177,4 +238,20 @@ def run(
     update_issue_body(
         campaign.issue_repo, issue_number, render_body(plan, item_state),
     )
+
+    # 5. Post run report if anything's worth notifying about.
+    report = report_mod.build_run_report(
+        plan=plan, before=before_state, after=item_state, run_url=run_url,
+    )
+    if report is not None:
+        post_issue_comment(campaign.issue_repo, issue_number, report)
+        _write_step_summary(report)
+    elif newly_created:
+        # Mirror the creation announcement into the workflow run summary
+        # even when nothing changed beyond the initial seed.
+        _write_step_summary(
+            f"Created tracking issue [#{issue_number}]"
+            f"(https://github.com/{campaign.issue_repo}/issues/{issue_number}) "
+            f"for **{plan.title}**.\n"
+        )
     return issue_number

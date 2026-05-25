@@ -32,7 +32,8 @@ class _FakeCampaign:
 def _patch_gh(monkeypatch, *, existing_issue: int | None = None,
               existing_body: str = "") -> dict:
     """Patch all gh calls to in-memory fakes. Returns a dict capturing state."""
-    captured = {"issue_body": existing_body, "created": False, "edits": []}
+    captured = {"issue_body": existing_body, "created": False, "edits": [],
+                "comments": [], "assignees": []}
 
     def fake_find(repo, title):
         return existing_issue
@@ -49,10 +50,18 @@ def _patch_gh(monkeypatch, *, existing_issue: int | None = None,
         captured["edits"].append(body)
         captured["issue_body"] = body
 
+    def fake_comment(repo, number, body):
+        captured["comments"].append(body)
+
+    def fake_assign(repo, number, users):
+        captured["assignees"].extend(users)
+
     monkeypatch.setattr(framework, "find_open_issue_by_title", fake_find)
     monkeypatch.setattr(framework, "create_issue", fake_create)
     monkeypatch.setattr(framework, "fetch_issue_body", fake_fetch)
     monkeypatch.setattr(framework, "update_issue_body", fake_update)
+    monkeypatch.setattr(framework, "post_issue_comment", fake_comment)
+    monkeypatch.setattr(framework, "add_issue_assignees", fake_assign)
     return captured
 
 
@@ -147,6 +156,53 @@ def test_run_unknown_handler_marks_failed(monkeypatch):
     parsed = state_mod.parse(cap["issue_body"])
     assert parsed["x"].status == "failed"
     assert "unknown handler" in parsed["x"].notes
+
+
+def test_run_posts_creation_announcement_with_notify_users(monkeypatch):
+    items = [Item(id="x", title="Open PR", handler="h")]
+    cap = _patch_gh(monkeypatch, existing_issue=None)
+    framework.run(
+        _FakeCampaign(items),
+        params={"notify_users": ["yangan"], "run_url": "https://x/y"},
+        handlers={"h": lambda ctx: HandlerResult(status="completed", pr=1)},
+    )
+    # Creation announcement + run report (transition happened).
+    assert len(cap["comments"]) == 2
+    assert "Campaign **Plan**" in cap["comments"][0]
+    assert "@yangan" in cap["comments"][0]
+    assert "https://x/y" in cap["comments"][0]
+    assert "Run report" in cap["comments"][1]
+    assert "PR #1" in cap["comments"][1]
+    assert cap["assignees"] == ["yangan"]
+
+
+def test_run_skips_run_report_when_nothing_changed(monkeypatch):
+    items = [Item(id="x", title="Open PR", handler="h")]
+    prior = {"x": ItemState(status="completed", pr=5)}
+    cap = _patch_gh(monkeypatch, existing_issue=42,
+                    existing_body=state_mod.serialize(prior) + "\n")
+    framework.run(
+        _FakeCampaign(items), params={},
+        handlers={"h": lambda ctx: HandlerResult(status="completed", pr=5)},
+    )
+    # No creation announcement (issue already existed) and no run report
+    # because the only handler-driven item was completed and skipped.
+    assert cap["comments"] == []
+
+
+def test_run_posts_run_report_for_blocker_only(monkeypatch):
+    items = [Item(id="x", title="Open PR", handler="h")]
+    prior = {"x": ItemState(status="failed", notes="boom")}
+    cap = _patch_gh(monkeypatch, existing_issue=42,
+                    existing_body=state_mod.serialize(prior) + "\n")
+    # Handler returns failed again with same notes — no transition, but
+    # the blocker is still present and should be surfaced.
+    framework.run(
+        _FakeCampaign(items), params={},
+        handlers={"h": lambda ctx: HandlerResult(status="failed", notes="boom")},
+    )
+    assert len(cap["comments"]) == 1
+    assert "Blockers (1)" in cap["comments"][0]
 
 
 def test_run_dry_run_skips_io(monkeypatch):
