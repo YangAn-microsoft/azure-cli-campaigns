@@ -73,7 +73,7 @@ def build_run_report(
     for item in plan.items:
         b = _state(before, item.id)
         a = _state(after, item.id)
-        if (b.status, b.pr, b.notes) != (a.status, a.pr, a.notes):
+        if (b.status, b.phase, b.pr, b.notes) != (a.status, a.phase, a.pr, a.notes):
             transitions.append((item, b, a))
 
     failed = [it for it in plan.items
@@ -94,12 +94,20 @@ def build_run_report(
     if transitions:
         lines.append(f"### Changes ({len(transitions)})")
         for item, b, a in transitions:
-            parts = [f"`{b.status}` → `{a.status}`"]
+            # For multi-phase items, include phase so readers know which
+            # milestone moved (e.g. "created → merged").
+            if len(item.phases) > 1:
+                b_label = f"`{b.status}@{b.phase or '—'}`"
+                a_label = f"`{a.status}@{a.phase or '—'}`"
+            else:
+                b_label = f"`{b.status}`"
+                a_label = f"`{a.status}`"
+            parts = [f"{b_label} \u2192 {a_label}"]
             if a.pr is not None and a.pr != b.pr:
                 parts.append(f"PR #{a.pr}")
             if a.notes:
                 parts.append(a.notes)
-            lines.append(f"- **{item.id}** — {' · '.join(parts)}")
+            lines.append(f"- **{item.id}** \u2014 {' \u00b7 '.join(parts)}")
         lines.append("")
 
     if failed:

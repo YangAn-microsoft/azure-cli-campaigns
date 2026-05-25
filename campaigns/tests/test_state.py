@@ -43,3 +43,19 @@ def test_parse_ignores_non_dict_item_values():
     parsed = state_mod.parse(body)
     assert "a" not in parsed
     assert parsed["b"].status == "completed"
+
+
+def test_phase_roundtrips():
+    original = {
+        "x": ItemState(status="completed", phase="created", pr=10),
+        "y": ItemState(status="pending"),  # no phase -> omitted
+    }
+    parsed = state_mod.parse(state_mod.serialize(original))
+    assert parsed["x"].phase == "created"
+    assert parsed["x"].status == "completed"
+    assert parsed["y"].phase == ""
+
+
+def test_phase_field_omitted_when_empty():
+    block = state_mod.serialize({"y": ItemState(status="pending")})
+    assert '"phase"' not in block

@@ -212,3 +212,93 @@ def test_run_dry_run_skips_io(monkeypatch):
     n = framework.run(_FakeCampaign(items), params={}, handlers={},
                       dry_run=True)
     assert n == -1
+
+
+# --- Multi-phase items --------------------------------------------------
+
+def test_multiphase_handler_default_phase_is_first(monkeypatch):
+    items = [Item(id="x", title="Open PR", handler="h",
+                  phases=("created", "merged"))]
+    cap = _patch_gh(monkeypatch, existing_issue=None)
+    framework.run(
+        _FakeCampaign(items), params={},
+        handlers={"h": lambda ctx: HandlerResult(status="completed", pr=1)},
+    )
+    parsed = state_mod.parse(cap["issue_body"])
+    # Handler omitted phase => framework defaults to first phase.
+    assert parsed["x"].phase == "created"
+    assert parsed["x"].status == "completed"
+
+
+def test_multiphase_explicit_phase_honoured(monkeypatch):
+    items = [Item(id="x", title="x", handler="h",
+                  phases=("created", "merged"))]
+    cap = _patch_gh(monkeypatch, existing_issue=None)
+    framework.run(
+        _FakeCampaign(items), params={},
+        handlers={"h": lambda ctx: HandlerResult(
+            status="completed", phase="merged", notes="nothing to do",
+        )},
+    )
+    parsed = state_mod.parse(cap["issue_body"])
+    assert parsed["x"].phase == "merged"
+
+
+def test_multiphase_redispatched_when_not_fully_completed(monkeypatch):
+    items = [Item(id="x", title="x", handler="h",
+                  phases=("created", "merged"))]
+    prior = {"x": ItemState(status="completed", phase="created", pr=5)}
+    cap = _patch_gh(monkeypatch, existing_issue=42,
+                    existing_body=state_mod.serialize(prior) + "\n")
+    calls = {"n": 0}
+
+    def handler(ctx):
+        calls["n"] += 1
+        return HandlerResult(status="completed", phase="created", pr=5)
+
+    framework.run(_FakeCampaign(items), params={}, handlers={"h": handler})
+    # Even though status == completed, phase != final_phase, so the
+    # handler is re-dispatched (idempotent by design).
+    assert calls["n"] == 1
+
+
+def test_multiphase_skipped_when_fully_completed(monkeypatch):
+    items = [Item(id="x", title="x", handler="h",
+                  phases=("created", "merged"))]
+    prior = {"x": ItemState(status="completed", phase="merged", pr=5)}
+    cap = _patch_gh(monkeypatch, existing_issue=42,
+                    existing_body=state_mod.serialize(prior) + "\n")
+    calls = {"n": 0}
+
+    def handler(ctx):
+        calls["n"] += 1
+        return HandlerResult(status="completed", phase="merged")
+
+    framework.run(_FakeCampaign(items), params={}, handlers={"h": handler})
+    assert calls["n"] == 0
+
+
+def test_multiphase_checklist_shows_phase_pips():
+    plan = CampaignPlan(title="t", intro="", items=[
+        Item(id="bump", title="B", handler="h",
+             phases=("created", "merged")),
+    ])
+    body = framework.render_body(plan, {
+        "bump": ItemState(status="completed", phase="created", pr=10),
+    })
+    # Plan checklist line shows both phases with status pips.
+    assert "created" in body
+    assert "merged" in body
+    # Checkbox unchecked because we haven't reached the final phase.
+    assert "[ ] **bump**" in body
+
+
+def test_multiphase_checklist_checked_when_final_phase_completed():
+    plan = CampaignPlan(title="t", intro="", items=[
+        Item(id="bump", title="B", handler="h",
+             phases=("created", "merged")),
+    ])
+    body = framework.render_body(plan, {
+        "bump": ItemState(status="completed", phase="merged", pr=10),
+    })
+    assert "[x] **bump**" in body

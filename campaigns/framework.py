@@ -18,7 +18,18 @@ from .base import (
     HandlerResult,
     Item,
     ItemState,
+    is_fully_completed,
+    phase_status,
 )
+
+# Phase pips used in the Plan checklist for multi-phase items.
+_PHASE_GLYPH = {
+    "completed": "\u2705",
+    "in_progress": "\U0001F501",
+    "failed": "\u274C",
+    "pending": "\u23F3",
+    "skipped": "\u23ED\uFE0F",
+}
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -152,11 +163,18 @@ def render_body(
     lines.append("")
     for item in plan.items:
         st = item_state.get(item.id, ItemState())
-        check = "x" if st.status == "completed" else " "
+        check = "x" if is_fully_completed(item, st) else " "
         suffix_parts: list[str] = []
+        # Phase pips for multi-phase items, e.g. "✅ created · ⏳ merged".
+        if len(item.phases) > 1:
+            pips = []
+            for phase in item.phases:
+                glyph = _PHASE_GLYPH.get(phase_status(item, st, phase), "")
+                pips.append(f"{glyph} {phase}".strip())
+            suffix_parts.append(" \u00b7 ".join(pips))
         if st.pr is not None:
             suffix_parts.append(f"PR #{st.pr}")
-        if st.status in {"skipped", "failed", "in_progress"}:
+        if st.status in {"skipped", "failed", "in_progress"} and len(item.phases) == 1:
             suffix_parts.append(f"_{st.status}_")
         if st.notes:
             suffix_parts.append(st.notes)
@@ -213,9 +231,16 @@ def run(
     else:
         print(f"campaign[{campaign.id}]: reusing issue #{issue_number}")
 
-    # 2. Load current state.
+    # 2. Load current state. Prune entries no longer in the plan (schema
+    #    drift across campaign edits) and seed any missing ones.
     body = fetch_issue_body(campaign.issue_repo, issue_number)
     item_state = state_mod.parse(body)
+    plan_ids = {item.id for item in plan.items}
+    stale = [k for k in item_state if k not in plan_ids]
+    for k in stale:
+        del item_state[k]
+    if stale:
+        print(f"campaign[{campaign.id}]: pruned stale state entries: {sorted(stale)}")
     for item in plan.items:
         item_state.setdefault(item.id, ItemState())
     before_state = copy.deepcopy(item_state)
@@ -225,7 +250,7 @@ def run(
         if item.handler is None:
             continue
         st = item_state[item.id]
-        if st.status == "completed" and not force_recreate:
+        if is_fully_completed(item, st) and not force_recreate:
             print(f"campaign[{campaign.id}]: item '{item.id}' already completed, skipping")
             continue
         handler = handlers.get(item.handler)
@@ -250,8 +275,12 @@ def run(
             item_state[item.id] = ItemState(status="failed", notes=str(exc)[:200])
             print(f"campaign[{campaign.id}]: handler '{item.handler}' failed: {exc}")
             continue
+        # If the handler didn't specify a phase, default to the item's
+        # first phase. Multi-phase handlers are expected to be explicit.
+        new_phase = result.phase or item.first_phase
         item_state[item.id] = ItemState(
             status=result.status, pr=result.pr, notes=result.notes,
+            phase=new_phase if result.status != "pending" else st.phase,
         )
 
     # 4. Re-render and update issue body.

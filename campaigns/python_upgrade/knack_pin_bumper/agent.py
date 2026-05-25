@@ -41,6 +41,10 @@ class PinResult:
     status: str  # pending | in_progress | completed | failed
     pr: int | None = None
     notes: str = ""
+    # Which phase the status applies to. "" (default) means "let the
+    # framework pick the first phase"; "merged" is set explicitly when
+    # there's nothing left to do (pin already at target).
+    phase: str = ""
 
 
 def run_pipeline(
@@ -86,6 +90,7 @@ def run_pipeline(
         return PinResult(
             status="completed",
             notes=f"setup.py already pins knack to {target_version}",
+            phase="merged",
         )
 
     branch = f"{BRANCH_PREFIX}{new_minor}"
@@ -97,6 +102,7 @@ def run_pipeline(
             status="in_progress",
             pr=existing,
             notes=f"knack pin PR open (bumping to {target_version})",
+            phase="created",
         )
 
     if dry_run:
@@ -104,8 +110,9 @@ def run_pipeline(
             status="in_progress",
             notes=(
                 f"[dry-run] would open PR bumping knack pin "
-                f"{current.version} → {target_version}"
+                f"{current.version} \u2192 {target_version}"
             ),
+            phase="created",
         )
 
     # Stage 4: branch, edit, push, PR.
@@ -132,8 +139,7 @@ def run_pipeline(
     return PinResult(
         status="in_progress",
         pr=pr_number if pr_number > 0 else None,
-        notes=f"opened PR bumping knack pin {current.version} → {target_version}",
-    )
+        notes=f"opened PR bumping knack pin {current.version} → {target_version}",        phase="created",    )
 
 
 def _render_pr_body(

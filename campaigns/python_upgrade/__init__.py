@@ -12,6 +12,10 @@ from pathlib import Path
 from .azure_cli_upgrader import agent, detect
 from .knack_upgrader import agent as knack_agent
 from .knack_pin_bumper import agent as knack_pin_agent
+from .validators import (
+    pypi_classifier_validator_handler,
+    repo_file_validator_handler,
+)
 
 from ..base import Campaign, CampaignPlan, HandlerContext, HandlerResult, Item
 
@@ -82,12 +86,15 @@ def _build_items(
 ) -> list[Item]:
     new = target.minor_str
     return [
-        # Lead item: bumps the embedded interpreter in azure-cli. Opens day 0
-        # so CI feedback surfaces follow-up work as early as possible.
+        # Lead item: bumps the embedded interpreter in azure-cli. Two phases:
+        #   created -- handler opens the PR (or detects an existing one).
+        #   merged  -- the PR has been merged. Gated by all companion items
+        #              (each must declare Python <new> support) plus the
+        #              knack-pin bump landing.
         Item(
             id="azure-cli-bump",
             title=f"Support Python {new} "
-                  f"(bump embedded interpreter: {current.full_str} → {target.full_str})",
+                  f"(bump embedded interpreter: {current.full_str} \u2192 {target.full_str})",
             handler="azure_cli_upgrader",
             params={
                 "current_minor": current.minor_str,
@@ -95,9 +102,19 @@ def _build_items(
                 "new_full": target.full_str,
             },
             repo=handler_repo,
+            phases=("created", "merged"),
+            depends_on={
+                "merged": (
+                    "aaz-dev",
+                    "azdev",
+                    "azure-cli-extensions",
+                    "azure-cli-knack-pin:merged",
+                ),
+            },
         ),
-        # Parallel: opens PR on knack repo declaring new Python support.
-        # Flips to completed once knack ships a release on PyPI.
+        # Parallel: opens a PR on the knack repo declaring new Python
+        # support. Single "done" phase -- the handler short-circuits to
+        # completed once knack ships on PyPI with the new classifier.
         Item(
             id="prereq-knack",
             title=f"`knack` supports Python {new}",
@@ -105,31 +122,45 @@ def _build_items(
             params={"new_minor": target.minor_str},
             repo=knack_repo,
         ),
-        # Follow-up: after knack ships, bump the knack pin in azure-cli
-        # (separate small PR, decoupled from the main embedded-Python PR).
+        # Follow-up: after knack ships, bump the knack pin in azure-cli.
+        # Multi-phase like the main bump: the PR is one milestone, the
+        # merge is another. Its merged phase gates azure-cli-bump:merged.
         Item(
             id="azure-cli-knack-pin",
             title=f"Bump `knack` pin in azure-cli after Python {new} release",
             handler="knack_pin_bumper",
             params={"new_minor": target.minor_str},
             repo=handler_repo,
+            phases=("created", "merged"),
             depends_on=("prereq-knack",),
         ),
-        # Companion repos: upgraded alongside azure-cli, not blocking prereqs.
+        # Companion repos: each declares Python <new> support independently
+        # of the bump PR. Each has a lightweight validator handler so the
+        # campaign auto-detects completion. They feed into azure-cli-bump's
+        # merged phase (declared above), not into its created phase --
+        # opening the bump PR doesn't require any companion to be ready.
         Item(
             id="aaz-dev",
             title=f"`aaz-dev` supports Python {new}",
-            depends_on=("azure-cli-bump",),
+            handler="pypi_classifier_validator",
+            params={"package": "aaz-dev", "new_minor": target.minor_str},
         ),
         Item(
             id="azdev",
             title=f"`azdev` supports Python {new}",
-            depends_on=("azure-cli-bump",),
+            handler="pypi_classifier_validator",
+            params={"package": "azdev", "new_minor": target.minor_str},
         ),
         Item(
             id="azure-cli-extensions",
             title=f"`azure-cli-extensions` supports Python {new}",
-            depends_on=("azure-cli-bump",),
+            handler="repo_file_validator",
+            repo="Azure/azure-cli-extensions",
+            params={
+                "path": "azure-pipelines.yml",
+                "needle": "{new_minor}",
+                "new_minor": target.minor_str,
+            },
         ),
     ]
 
@@ -159,7 +190,13 @@ def _render_intro(*, current: detect.Version, target: detect.Version) -> str:
 
 def azure_cli_upgrader_handler(ctx: HandlerContext) -> HandlerResult:
     """Adapt the framework's HandlerContext to ``agent.run_pipeline`` and map
-    the returned PipelineResult back into a HandlerResult."""
+    the returned PipelineResult back into a HandlerResult.
+
+    ``azure-cli-bump`` is multi-phase (``created``/``merged``). The agent
+    can at best detect or open the PR -- it cannot merge it -- so any
+    non-skipped result is reported as the ``created`` phase. The merged
+    phase is set later by a (future) merge-watcher or manually.
+    """
     repo_root = Path(ctx.params.get("repo_root") or ".").resolve()
     result = agent.run_pipeline(
         repo_root=repo_root,
@@ -176,7 +213,10 @@ def azure_cli_upgrader_handler(ctx: HandlerContext) -> HandlerResult:
         run_url=ctx.params.get("run_url", ""),
         tracking_issue=ctx.issue_number,
     )
-    return HandlerResult(status=result.status, pr=result.pr, notes=result.notes)
+    phase = "created" if result.status in ("completed", "in_progress", "failed") else ""
+    return HandlerResult(
+        status=result.status, pr=result.pr, notes=result.notes, phase=phase,
+    )
 
 
 # Backwards-compat alias for older registrations.
@@ -212,4 +252,7 @@ def knack_pin_bumper_handler(ctx: HandlerContext) -> HandlerResult:
         dry_run=ctx.dry_run,
         force_recreate=ctx.force_recreate,
     )
-    return HandlerResult(status=result.status, pr=result.pr, notes=result.notes)
+    return HandlerResult(
+        status=result.status, pr=result.pr, notes=result.notes,
+        phase=result.phase,
+    )
