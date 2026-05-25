@@ -35,5 +35,5 @@ jobs:
       campaign: python-upgrade
       target_repo: ${{ inputs.target_repo || 'YangAn-microsoft/azure-cli' }}
       issue_repo: ${{ inputs.issue_repo || inputs.target_repo || 'YangAn-microsoft/azure-cli' }}
-      params_json: '{"reference_repo":"Azure/azure-cli"}'
+      params_json: '{"reference_repo":"Azure/azure-cli","knack_repo":"YangAn-microsoft/knack","notify_users":["YangAn-microsoft"]}'
       dry_run: ${{ inputs.dry_run || false }}
