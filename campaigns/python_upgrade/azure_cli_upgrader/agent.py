@@ -179,9 +179,6 @@ def _render_pr_body(
         forgotten_list = "\n".join(f"- `{w}`" for w in forgotten)
     else:
         forgotten_list = "_(none — post-check found no leftover references.)_"
-    # Substitute placeholders other than {next_steps} via .format. Then plug
-    # next_steps in via plain replace so its embedded braces (YAML/code) do
-    # not get reinterpreted as format fields.
     body = template.format(
         current_minor=current.minor_str,
         new_minor=target.minor_str,
