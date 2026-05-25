@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from python_upgrade_agent.discover import Candidate
-from python_upgrade_agent.post_check import find_forgotten_hits
-from python_upgrade_agent.validate import ValidatedEdit
+from campaigns.python_upgrade.azure_cli_upgrader.discover import Candidate
+from campaigns.python_upgrade.azure_cli_upgrader.post_check import find_forgotten_hits
+from campaigns.python_upgrade.azure_cli_upgrader.validate import ValidatedEdit
 
 
 def _cand(path: str, lineno: int, text: str) -> Candidate:

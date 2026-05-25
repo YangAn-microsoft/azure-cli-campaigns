@@ -15,4 +15,4 @@ dependencies = []
 dev = ["pytest>=7"]
 
 [tool.setuptools.packages.find]
-include = ["campaigns*", "python_upgrade_agent*"]
+include = ["campaigns*"]

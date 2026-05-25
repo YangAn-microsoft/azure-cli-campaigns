@@ -1,6 +1,6 @@
 import pytest
 
-from python_upgrade_agent.detect import (
+from campaigns.python_upgrade.azure_cli_upgrader.detect import (
     UpgradeDecision,
     Version,
     decide_upgrade,

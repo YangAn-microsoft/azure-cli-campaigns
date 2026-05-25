@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from python_upgrade_agent.validate import ValidationError, validate
+from campaigns.python_upgrade.azure_cli_upgrader.validate import ValidationError, validate
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ def test_validate_rejects_empty_edits(repo: Path):
 
 
 def test_validate_rejects_oversize(repo: Path, monkeypatch):
-    import python_upgrade_agent.validate as v
+    import campaigns.python_upgrade.azure_cli_upgrader.validate as v
     monkeypatch.setattr(v, "MAX_CHANGED_LINES", 0)
     output = {
         "edits": [

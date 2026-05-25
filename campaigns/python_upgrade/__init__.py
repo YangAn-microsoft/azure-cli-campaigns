@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from python_upgrade_agent import agent, detect
+from .azure_cli_upgrader import agent, detect
 
-from .base import Campaign, CampaignPlan, HandlerContext, HandlerResult, Item
+from ..base import Campaign, CampaignPlan, HandlerContext, HandlerResult, Item
 
 
 class PythonUpgradeCampaign:
@@ -114,7 +114,7 @@ def _build_items(
 
 
 def _render_intro(*, current: detect.Version, target: detect.Version) -> str:
-    raw = (Path(__file__).parent / "python_upgrade_intro.md").read_text(encoding="utf-8")
+    raw = (Path(__file__).parent / "intro.md").read_text(encoding="utf-8")
     substitutions = {
         "{{current_minor}}": current.minor_str,
         "{{new_minor}}": target.minor_str,

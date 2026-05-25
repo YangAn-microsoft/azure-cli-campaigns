@@ -9,7 +9,7 @@ import pytest
 
 from campaigns import python_upgrade as pu
 from campaigns.base import HandlerContext, Item
-from python_upgrade_agent import detect
+from campaigns.python_upgrade.azure_cli_upgrader import detect
 
 
 def _patch_detection(monkeypatch, current_full: str, new_full: str) -> None:
@@ -77,7 +77,7 @@ def test_handler_passes_tracking_issue_through(monkeypatch):
 
     def fake_run_pipeline(**kwargs):
         captured.update(kwargs)
-        from python_upgrade_agent.agent import PipelineResult
+        from campaigns.python_upgrade.azure_cli_upgrader.agent import PipelineResult
         return PipelineResult(status="completed", pr=123)
 
     monkeypatch.setattr(pu.agent, "run_pipeline", fake_run_pipeline)

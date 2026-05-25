@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from python_upgrade_agent.discover import (
+from campaigns.python_upgrade.azure_cli_upgrader.discover import (
     _build_pattern,
     candidate_paths,
     git_grep,
