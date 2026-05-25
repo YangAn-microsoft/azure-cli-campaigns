@@ -221,6 +221,14 @@ Rules (strict):
     the recorded reason, not a live build target". This rule overrides rule
     10's "shell scripts → EDIT" default whenever the line is a `#` comment
     containing a GitHub PR/issue URL.
+14. When referencing GitHub issues or PRs in the `notes`, `why`, or `reason`
+    fields you produce, ALWAYS write them as the bare number form `#1234`.
+    Do NOT use full URLs (`https://github.com/Azure/azure-cli/issues/1234`),
+    markdown links (`[#1234](https://...)`), or cross-repo shorthand
+    (`Azure/azure-cli#1234`). Any of those forms triggers cross-reference
+    notifications on the linked upstream issues, which spams their watchers.
+    The bare `#1234` form only links to issues in the repo where this PR
+    lands, which is the intended behaviour.
 
 Schema:
 {
