@@ -105,9 +105,9 @@ def _build_items(
             phases=("created", "merged"),
             depends_on={
                 "merged": (
-                    "aaz-dev",
-                    "azdev",
-                    "azure-cli-extensions",
+                    "aaz-dev-bump",
+                    "azdev-bump",
+                    "azure-cli-extensions-bump",
                     "azure-cli-knack-pin:merged",
                 ),
             },
@@ -116,7 +116,7 @@ def _build_items(
         # support. Single "done" phase -- the handler short-circuits to
         # completed once knack ships on PyPI with the new classifier.
         Item(
-            id="prereq-knack",
+            id="knack-bump",
             title=f"`knack` supports Python {new}",
             handler="knack_upgrader",
             params={"new_minor": target.minor_str},
@@ -132,7 +132,7 @@ def _build_items(
             params={"new_minor": target.minor_str},
             repo=handler_repo,
             phases=("created", "merged"),
-            depends_on=("prereq-knack",),
+            depends_on=("knack-bump",),
         ),
         # Companion repos: each declares Python <new> support independently
         # of the bump PR. Each has a lightweight validator handler so the
@@ -140,19 +140,19 @@ def _build_items(
         # merged phase (declared above), not into its created phase --
         # opening the bump PR doesn't require any companion to be ready.
         Item(
-            id="aaz-dev",
+            id="aaz-dev-bump",
             title=f"`aaz-dev` supports Python {new}",
             handler="pypi_classifier_validator",
             params={"package": "aaz-dev", "new_minor": target.minor_str},
         ),
         Item(
-            id="azdev",
+            id="azdev-bump",
             title=f"`azdev` supports Python {new}",
             handler="pypi_classifier_validator",
             params={"package": "azdev", "new_minor": target.minor_str},
         ),
         Item(
-            id="azure-cli-extensions",
+            id="azure-cli-extensions-bump",
             title=f"`azure-cli-extensions` supports Python {new}",
             handler="repo_file_validator",
             repo="Azure/azure-cli-extensions",
@@ -193,9 +193,11 @@ def azure_cli_upgrader_handler(ctx: HandlerContext) -> HandlerResult:
     the returned PipelineResult back into a HandlerResult.
 
     ``azure-cli-bump`` is multi-phase (``created``/``merged``). The agent
-    can at best detect or open the PR -- it cannot merge it -- so any
-    non-skipped result is reported as the ``created`` phase. The merged
-    phase is set later by a (future) merge-watcher or manually.
+    opens the PR (``created``) and, on a later run, detects that the same
+    PR has been merged on GitHub and advances to ``merged``. If the
+    pipeline reports an explicit ``phase`` (e.g. ``"merged"`` from the
+    idempotency check), that wins; otherwise any non-skipped result is
+    reported as ``created``.
     """
     repo_root = Path(ctx.params.get("repo_root") or ".").resolve()
     result = agent.run_pipeline(
@@ -213,7 +215,12 @@ def azure_cli_upgrader_handler(ctx: HandlerContext) -> HandlerResult:
         run_url=ctx.params.get("run_url", ""),
         tracking_issue=ctx.issue_number,
     )
-    phase = "created" if result.status in ("completed", "in_progress", "failed") else ""
+    if result.phase:
+        phase = result.phase
+    elif result.status in ("completed", "in_progress", "failed"):
+        phase = "created"
+    else:
+        phase = ""
     return HandlerResult(
         status=result.status, pr=result.pr, notes=result.notes, phase=phase,
     )

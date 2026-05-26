@@ -41,6 +41,7 @@ class PipelineResult:
     status: PipelineStatus
     pr: int | None = None
     notes: str = ""
+    phase: str = ""
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -277,6 +278,12 @@ def run_pipeline(
             if state == "OPEN":
                 print(f"agent: PR #{number} already open for {new_minor}; nothing to do.")
                 return PipelineResult(status="completed", pr=number, notes="existing open PR")
+            if state == "MERGED":
+                print(f"agent: PR #{number} for {new_minor} is MERGED; advancing phase.")
+                return PipelineResult(
+                    status="completed", pr=number,
+                    notes=f"PR #{number} merged", phase="merged",
+                )
             if force_recreate:
                 print(f"agent: PR #{number} for {new_minor} is {state}; --force-recreate set, proceeding.")
             else:
