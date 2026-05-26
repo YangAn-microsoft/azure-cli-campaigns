@@ -1,0 +1,95 @@
+name: Python Upgrade Demo Cleanup
+
+# One-click teardown for the python-upgrade demo. Closes the tracking
+# issue, closes any open PRs the demo opened, and deletes their branches
+# so a subsequent demo run starts from a clean slate.
+
+on:
+  workflow_dispatch:
+    inputs:
+      new_minor:
+        description: 'Python minor to clean up (X.Y), e.g. 3.15'
+        required: true
+        default: '3.15'
+      target_repo:
+        description: 'azure-cli fork that hosts the issue + bump PR.'
+        required: true
+        default: 'YangAn-microsoft/azure-cli'
+      knack_repo:
+        description: 'knack fork that hosts the knack PR.'
+        required: true
+        default: 'YangAn-microsoft/knack'
+      issue_repo:
+        description: 'Tracking-issue host repo. Defaults to target_repo.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Kill switch
+        env:
+          ENABLED: ${{ vars.RUN_CAMPAIGN_ENABLED }}
+        run: |
+          if [ "$ENABLED" != "true" ]; then
+            echo "Demo cleanup disabled (set repo variable RUN_CAMPAIGN_ENABLED=true to enable)."
+            exit 0
+          fi
+
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.AGENT_APP_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Close issue, PRs, and delete branches
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NEW_MINOR: ${{ inputs.new_minor }}
+          AZ: ${{ inputs.target_repo }}
+          KN: ${{ inputs.knack_repo }}
+          ISSUE_REPO: ${{ inputs.issue_repo || inputs.target_repo }}
+        run: |
+          set -e
+
+          close_prs_and_branch() {
+            local repo="$1"
+            local branch="$2"
+            local pr
+            pr=$(gh pr list --repo "$repo" --head "$branch" --state open --json number --jq '.[].number' || true)
+            for n in $pr; do
+              echo "closing $repo PR #$n (branch $branch)"
+              gh pr close "$n" --repo "$repo" --delete-branch --comment "demo cleanup" || true
+            done
+            # If no PR ever opened but branch exists on the remote, delete it directly.
+            if gh api "repos/$repo/git/refs/heads/$branch" >/dev/null 2>&1; then
+              echo "deleting orphan branch $branch on $repo"
+              gh api -X DELETE "repos/$repo/git/refs/heads/$branch" || true
+            fi
+          }
+
+          # 1. azure-cli fork: bump PR + knack-pin PR
+          close_prs_and_branch "$AZ" "python-${NEW_MINOR}-upgrade"
+          close_prs_and_branch "$AZ" "campaign/knack-pin-${NEW_MINOR}"
+
+          # 2. knack fork: knack-supports-python PR
+          close_prs_and_branch "$KN" "campaign/python-${NEW_MINOR}"
+
+          # 3. Tracking issue ("Support Python <new_minor>")
+          issue=$(gh issue list --repo "$ISSUE_REPO" \
+            --search "Support Python ${NEW_MINOR} in:title" \
+            --state open --json number,title \
+            --jq ".[] | select(.title == \"Support Python ${NEW_MINOR}\") | .number" || true)
+          for n in $issue; do
+            echo "closing $ISSUE_REPO issue #$n"
+            gh issue close "$n" --repo "$ISSUE_REPO" --comment "demo cleanup" || true
+          done
+
+          echo "cleanup complete for Python ${NEW_MINOR}"
