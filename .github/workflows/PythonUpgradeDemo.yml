@@ -1,0 +1,67 @@
+name: Python Upgrade Demo
+
+# Manual end-to-end demo for the python-upgrade campaign.
+#
+# Pretends a newer Python minor is released by passing forced
+# current_full + new_full into the campaign's params. Lets you exercise
+# the full pipeline (issue + per-item handlers + validators) against the
+# fork without waiting for python.org to actually publish a new minor.
+#
+# A fresh tracking issue is created per unique new_minor (the issue
+# title is "Support Python <new_minor>"). Re-running with the same
+# new_minor will update the existing issue rather than open a new one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      current_full:
+        description: 'Pretend-current Python version (X.Y.Z), e.g. 3.14.0'
+        required: true
+        default: '3.14.0'
+      new_full:
+        description: 'Pretend-new Python version (X.Y.Z), e.g. 3.15.0'
+        required: true
+        default: '3.15.0'
+      target_repo:
+        description: 'azure-cli fork to operate on (OWNER/REPO).'
+        required: true
+        default: 'YangAn-microsoft/azure-cli'
+      knack_repo:
+        description: 'knack fork to operate on (OWNER/REPO).'
+        required: true
+        default: 'YangAn-microsoft/knack'
+      issue_repo:
+        description: 'Tracking-issue host repo. Defaults to target_repo.'
+        required: false
+        default: ''
+      dry_run:
+        description: 'If true, print the plan only; do not touch GitHub.'
+        type: boolean
+        required: false
+        default: false
+      force_recreate:
+        description: 'Re-dispatch handlers even for items already completed.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  call:
+    uses: ./.github/workflows/RunCampaign.yml
+    secrets: inherit
+    with:
+      campaign: python-upgrade
+      target_repo: ${{ inputs.target_repo }}
+      issue_repo: ${{ inputs.issue_repo || inputs.target_repo }}
+      params_json: >-
+        {"current_full":"${{ inputs.current_full }}",
+         "new_full":"${{ inputs.new_full }}",
+         "reference_repo":"Azure/azure-cli",
+         "knack_repo":"${{ inputs.knack_repo }}",
+         "notify_users":["YangAn-microsoft"]}
+      dry_run: ${{ inputs.dry_run }}
+      force_recreate: ${{ inputs.force_recreate }}
