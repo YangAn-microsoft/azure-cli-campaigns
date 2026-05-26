@@ -9,18 +9,26 @@ mechanical part of bumping Azure CLI's embedded Python interpreter.
 
 ```
 .
-├── campaigns/                  # Framework + registered campaigns
-│   ├── base.py                 # Item / HandlerContext / Campaign protocol
-│   ├── state.py                # Hidden state-block parser
-│   ├── framework.py            # Generic runner (gh CLI I/O)
-│   ├── python_upgrade.py       # The python-upgrade campaign definition
-│   ├── python_upgrade_intro.md # Tracking-issue intro template
-│   └── registry.py             # CAMPAIGNS / HANDLERS lookup tables
-├── python_upgrade_agent/       # Handler for the azure-cli-bump item
-├── run_campaign.py             # CLI entry point
+├── campaigns/                          # Framework + registered campaigns
+│   ├── base.py                         # Item / HandlerContext / Campaign protocol
+│   ├── state.py                        # Hidden state-block parser
+│   ├── framework.py                    # Generic runner (gh CLI I/O)
+│   ├── report.py                       # Roadmap diagram renderer
+│   ├── registry.py                     # CAMPAIGNS / HANDLERS lookup tables
+│   ├── python_upgrade/                 # The python-upgrade campaign
+│   │   ├── __init__.py                 # Campaign class + handler entry points
+│   │   ├── intro.md                    # Tracking-issue intro template
+│   │   ├── azure_cli_upgrader/         # AI-assisted bump handler
+│   │   ├── knack_upgrader/             # knack support PR handler
+│   │   ├── knack_pin_bumper/           # azure-cli setup.py pin handler
+│   │   └── validators.py               # Reusable PyPI / repo-file checks
+│   └── tests/
+├── run_campaign.py                     # CLI entry point
 └── .github/workflows/
-    ├── RunCampaign.yml         # Manual workflow_dispatch + reusable
-    └── PythonUpgradeDaily.yml  # Cron wrapper that calls RunCampaign
+    ├── RunCampaign.yml                 # Manual dispatch + reusable
+    ├── PythonUpgradeDaily.yml          # Cron wrapper
+    ├── PythonUpgradeDemo.yml           # Forced-version end-to-end demo
+    └── PythonUpgradeDemoCleanup.yml    # One-click teardown of a demo run
 ```
 
 ## Running a campaign
@@ -65,15 +73,19 @@ you need to fork to experiment safely:
 
 ## Adding a new campaign
 
-1. Write a class in `campaigns/<name>.py` implementing the `Campaign`
-   protocol (`build(params) -> CampaignPlan | None`).
-2. Optionally define a handler function with signature
-   `(HandlerContext) -> HandlerResult` and register it under `HANDLERS` in
-   `campaigns/registry.py`.
-3. Register the campaign under `CAMPAIGNS`.
-4. Add the campaign id to the `options` list in
+See **[docs/adding-a-campaign.md](docs/adding-a-campaign.md)** for the
+full walkthrough — anatomy, a hello-world example, multi-phase items,
+dependencies, validators, tests, and the workflow wiring checklist.
+
+Short version:
+
+1. Create `campaigns/<name>/__init__.py` with a class implementing the
+   `Campaign` protocol (`id`, `issue_repo`, `build(params)`).
+2. Optionally add handler functions `(HandlerContext) -> HandlerResult`.
+3. Register both in `campaigns/registry.py` (`CAMPAIGNS` + `HANDLERS`).
+4. Add the campaign id to the `options:` list in
    `.github/workflows/RunCampaign.yml`.
-5. Write tests under `campaigns/tests/`.
+5. Drop tests under `campaigns/tests/`.
 
 ## Local development
 
